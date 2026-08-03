@@ -1,4 +1,4 @@
-name: Copy Image
+name: Sync Images
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
         required: true
 
 jobs:
-  copy-image:
+  sync-image:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -35,7 +35,7 @@ jobs:
         run: |
           mkdir -p ~/.docker/
           echo "${{ secrets.DOCKER_CONFIG_BASE64 }}" | base64 -d | jq -r | tee ~/.docker/config.json > /dev/null
-      - name: Copy Image
+      - name: Sync Images
         run: |
           echo "src-image: ${{ inputs.SRC_IMAGE }}"
           for dst_image in $(echo ${{ inputs.DST_IMAGE }} | tr ',' '\n'); do

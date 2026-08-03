@@ -5,13 +5,13 @@
 包含两个工作流:
 
 - **Docker Build** ([build-image.yml](.github/workflows/build-image.yml)):根据 Dockerfile 构建多架构镜像并推送至 GHCR。
-- **Copy Image** ([sync-image.yml](.github/workflows/sync-image.yml)):使用 `skopeo copy --all` 将镜像同步到多个目标仓库。
+- **Sync Images** ([sync-images.yml](.github/workflows/sync-images.yml)):使用 `skopeo copy --all` 将镜像同步到多个目标仓库。
 
 ## 配置说明
 
 在使用此流水线之前，必须在 GitHub 项目的 **Settings > Secrets and variables > Actions** 中配置以下 Secrets：
 
-### 1. DOCKER_CONFIG_BASE64 (Copy Image 工作流必填)
+### 1. DOCKER_CONFIG_BASE64 (Sync Images 工作流必填)
 
 用于镜像仓库的登录认证。该值是 Docker 配置文件 `~/.docker/config.json` 的 Base64 编码字符串。
 
@@ -31,11 +31,13 @@ cat ~/.docker/config.json | python3 -c "import base64,sys; print(base64.b64encod
 
 ### 2. GITHUB_TOKEN (Docker Build 工作流)
 
-Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR，无需额外配置。首次推送前请确认 **Settings > Packages** 中的写入权限（工作流已声明 `packages: write`）。
+Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR，无需额外配置。
 
 ## 使用方法
 
 ### Docker Build（构建并推送镜像）
+
+> **注意**：若该镜像包（package）此前已由其它仓库的构建流水线构建并关联了仓库源，推送到 GHCR 时可能会失败。此时需进入该包所在项目的 **Package settings**（包设置），删除其 **Repository source**（仓库源），解除与其它仓库的关联后再重新构建。
 
 1. 进入项目的 **Actions** 选项卡。
 2. 选择左侧的 **Docker Build** 工作流。
@@ -51,10 +53,10 @@ Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR�
 
 5. 点击 **Run workflow** 开始构建。
 
-### Copy Image（同步镜像）
+### Sync Images（同步镜像）
 
 1. 进入项目的 **Actions** 选项卡。
-2. 选择左侧的 **Copy Image** 工作流。
+2. 选择左侧的 **Sync Images** 工作流。
 3. 点击 **Run workflow** 下拉按钮。
 4. 填写以下参数：
 
@@ -80,4 +82,3 @@ Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR�
 ## 仓库镜像
 
 [MyCode](https://git.jetsung.com/jetsung/docker-build-sync) ● [AtomGit](https://atomgit.com/jetsung/docker-build-sync) ● [GitHub](https://github.com/jetsung/docker-build-sync)
-
