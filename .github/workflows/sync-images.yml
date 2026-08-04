@@ -16,21 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Install Skopeo
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgpgme-dev \
-            libassuan-dev \
-            libdevmapper-dev
-          curl -fsSL https://api.github.com/repos/jetsung/install-skopeo/releases | jq -r '.[]
-            | .assets[]
-            | .browser_download_url
-            | select(test("skopeo-.*-linux-amd64.tar.xz"))' \
-            | xargs curl -sL \
-            | tar xJ -C /usr/local/bin/ skopeo
-      - name: Check Skopeo Version
-        run: skopeo --version
+      - name: Setup Skopeo
+        uses: jetsung/install-skopeo@v1
       - name: Set Docker Config
         run: |
           mkdir -p ~/.docker/
@@ -38,7 +25,9 @@ jobs:
       - name: Sync Images
         run: |
           echo "src-image: ${{ inputs.SRC_IMAGE }}"
+          echo "----------------------------------------"
           for dst_image in $(echo ${{ inputs.DST_IMAGE }} | tr ',' '\n'); do
             echo "dst-image: $dst_image"
             skopeo copy --all "docker://${{ inputs.SRC_IMAGE }}" "docker://$dst_image"
+            echo "----------------------------------------"
           done

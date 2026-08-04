@@ -13,21 +13,30 @@
 
 ### 1. DOCKER_CONFIG_BASE64 (Sync Images 工作流必填)
 
-用于镜像仓库的登录认证。该值是 Docker 配置文件 `~/.docker/config.json` 的 Base64 编码字符串。
+用于镜像仓库的登录认证。该值是 Docker 配置文件 `config.json` 的 Base64 编码字符串。
 
 **获取方法：**
 
 在本地终端执行以下命令（请确保已先执行 `docker login` 登录了相关仓库）：
 
+> **注意**：`docker login` 实际写入的配置文件路径取决于执行登录命令所使用的用户。普通用户默认保存在 `~/.docker/config.json`（`~` 对应该用户的家目录）；若使用 `root` 用户登录，则通常保存在 `/root/.docker/config.json`，而非 `~/.docker/config.json`（非 root 用户的家目录下）。请确认登录时所用的用户，并取对应用户家目录下的 `config.json` 文件进行编码。
+
 ```bash
-# Linux / macOS
+# Linux / macOS（以实际登录用户对应的路径为准，例如普通用户）
 cat ~/.docker/config.json | base64 -w 0
 
-# 如果没有 base64 命令，可以使用 python
+# 若使用 root 用户登录，则路径通常为
+cat /root/.docker/config.json | base64 -w 0
+
+# 如果没有 base64 命令，可以使用 python（同样注意替换为正确的路径）
 cat ~/.docker/config.json | python3 -c "import base64,sys; print(base64.b64encode(sys.stdin.read().encode()).decode())"
 ```
 
+![](screenshot/sync-images-1.png)
+
 复制输出的字符串，并将其作为 `DOCKER_CONFIG_BASE64` 的值保存到 GitHub Secrets 中。
+
+![](screenshot/sync-images-2.png)
 
 ### 2. GITHUB_TOKEN (Docker Build 工作流)
 
@@ -53,7 +62,11 @@ Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR�
 
 5. 点击 **Run workflow** 开始构建。
 
+![](screenshot/docker-build.png)
+
 ### Sync Images（同步镜像）
+
+> **注意**：`DST_IMAGE` 中每个目标镜像的注册中心（即地址中的域名或仓库前缀部分，例如 `ghcr.io`、`myreg.com`）必须已在 **DOCKER_CONFIG_BASE64** 配置文件中预先登录并配置好对应的账号及密码。若未在该 Docker 配置文件（登录用户家目录下的 `config.json`，例如普通用户为 `~/.docker/config.json`、root 用户为 `/root/.docker/config.json`）中配置相应注册中心的认证信息，同步到该目标仓库时将会因认证失败而报错。请在执行同步前，确保已对 `DST_IMAGE` 涉及的所有注册中心执行过 `docker login`（使用正确的用户）并重新生成 `DOCKER_CONFIG_BASE64` 保存到 GitHub Secrets 中。
 
 1. 进入项目的 **Actions** 选项卡。
 2. 选择左侧的 **Sync Images** 工作流。
@@ -66,6 +79,8 @@ Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR�
 | **DST_IMAGE** | 目标镜像地址。如有多个目标，使用英文逗号 `,` 分隔。 | `ghcr.io/username/alpine:latest,myreg.com/alpine:latest` |
 
 5. 点击 **Run workflow** 开始同步。
+
+![](screenshot/sync-images.png)
 
 ## 功能特性
 
