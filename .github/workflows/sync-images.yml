@@ -17,7 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Setup Skopeo
-        uses: jetsung/install-skopeo@v1
+        uses: jetsung/install-skopeo@v0
       - name: Set Docker Config
         run: |
           mkdir -p ~/.docker/

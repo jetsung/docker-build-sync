@@ -1,0 +1,75 @@
+name: Build nginx-acme
+
+'on':
+  workflow_dispatch:
+    inputs:
+      nginx_version:
+        description: 'Nginx 版本 (例如: 1.26.3, 1.27.4)'
+        required: true
+        type: string
+      base_image:
+        description: '基础 Docker 镜像 (例如: ubuntu:24.04, debian:12, alpine:3.21)'
+        required: true
+        type: string
+        default: 'ubuntu:24.04'
+      acme_version:
+        description: 'nginx-acme 版本 (留空自动获取最新版)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Get nginx-acme latest version
+        id: acme
+        run: |
+          if [ -z "${{ inputs.acme_version }}" ]; then
+            echo "Fetching latest nginx-acme version..."
+            TAG=$(curl -fsSL https://api.github.com/repos/nginx/nginx-acme/releases/latest | jq -r '.tag_name')
+            VER="${TAG#v}"
+            echo "version=${VER}" >> "$GITHUB_OUTPUT"
+            echo "Latest: v${VER}"
+          else
+            echo "version=${{ inputs.acme_version }}" >> "$GITHUB_OUTPUT"
+            echo "Using: v${{ inputs.acme_version }}"
+          fi
+
+      - name: Set output file name
+        id: vars
+        run: |
+          OS_LABEL=$(echo "${{ inputs.base_image }}" | tr ':.' '-')
+          FILE="ngx_http_acme_module_nginx-${{ inputs.nginx_version }}_${OS_LABEL}"
+          echo "name=${FILE}" >> "$GITHUB_OUTPUT"
+          echo "file=${FILE}.so" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build .so module
+        uses: docker/build-push-action@v7
+        with:
+          file: docker/nginx-acme.Dockerfile
+          target: output
+          outputs: type=local,dest=./output
+          build-args: |
+            BASE_IMAGE=${{ inputs.base_image }}
+            NGINX_VERSION=${{ inputs.nginx_version }}
+            ACME_VERSION=${{ steps.acme.outputs.version }}
+          no-cache: true
+
+      - name: Rename artifact
+        run: |
+          ls -lh output/
+          mv output/ngx_http_acme_module.so "${{ steps.vars.outputs.file }}"
+
+      - name: Upload .so artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.vars.outputs.name }}
+          path: ${{ steps.vars.outputs.file }}
+          if-no-files-found: error
