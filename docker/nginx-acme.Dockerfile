@@ -2,41 +2,33 @@
 #
 # nginx-acme 动态模块构建 Dockerfile
 # 构建 ngx_http_acme_module.so 动态模块
-# 支持 Debian/Ubuntu (apt) 和 Alpine (apk) 基础镜像
+# 基于 Rust 官方镜像 (https://hub.docker.com/_/rust)
 #
 # 构建参数:
-#   BASE_IMAGE    - 基础镜像 (例如: ubuntu:24.04, debian:12, alpine:3.21)
+#   RUST_IMAGE    - Rust 镜像 tag (例如: 1-bookworm, slim-bookworm, alpine3.21)
 #   NGINX_VERSION - Nginx 版本 (例如: 1.26.3, 1.27.4)
 #   ACME_VERSION  - nginx-acme 版本 (例如: 0.4.1)
 
-ARG BASE_IMAGE
-ARG NGINX_VERSION
-ARG ACME_VERSION
-
-# ── 构建阶段 ──────────────────────────────────────────────────
-FROM ${BASE_IMAGE} AS builder
+ARG RUST_IMAGE
+FROM rust:${RUST_IMAGE} AS builder
 
 ARG NGINX_VERSION
 ARG ACME_VERSION
 
-# 安装编译依赖（支持 apt 和 apk）
+# 安装 nginx 编译依赖（支持 apt 和 apk）
 RUN set -eux; \
     if command -v apt-get > /dev/null 2>&1; then \
         apt-get update && \
         apt-get install -y --no-install-recommends \
-            curl ca-certificates jq \
-            clang pkg-config \
             libssl-dev libpcre2-dev zlib1g-dev \
             make && \
         rm -rf /var/lib/apt/lists/*; \
     elif command -v apk > /dev/null 2>&1; then \
         apk add --no-cache \
-            curl ca-certificates jq \
-            clang pkgconfig \
             openssl-dev pcre2-dev zlib-dev \
             linux-headers make; \
     else \
-        echo "Unsupported base image: only Debian/Ubuntu and Alpine are supported"; \
+        echo "Unsupported base image"; \
         exit 1; \
     fi
 

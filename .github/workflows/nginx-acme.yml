@@ -4,14 +4,15 @@ name: Build nginx-acme
   workflow_dispatch:
     inputs:
       nginx_version:
-        description: 'Nginx 版本 (例如: 1.26.3, 1.27.4)'
-        required: true
+        description: 'Nginx 版本 (留空自动获取最新主线版, 例如: 1.26.3, 1.27.4)'
+        required: false
         type: string
+        default: ''
       base_image:
-        description: '基础 Docker 镜像 (例如: ubuntu:24.04, debian:12, alpine:3.21)'
+        description: 'Rust 基础镜像 tag (例如: 1-bookworm, slim-bookworm, alpine3.21, 1-alpine, bullseye)'
         required: true
         type: string
-        default: 'ubuntu:24.04'
+        default: 'latest'
       acme_version:
         description: 'nginx-acme 版本 (留空自动获取最新版)'
         required: false
@@ -39,11 +40,30 @@ jobs:
             echo "Using: v${{ inputs.acme_version }}"
           fi
 
+      - name: Resolve nginx version
+        id: nginx
+        run: |
+          if [ -z "${{ inputs.nginx_version }}" ]; then
+            echo "Fetching latest nginx mainline version..."
+            VER=$(curl -fsSL https://nginx.org/en/download.html | \
+              grep -oP 'nginx-\d+\.\d+\.\d+\.tar\.gz' | \
+              sed 's/nginx-//;s/\.tar\.gz//' | \
+              sort -t. -k1,1n -k2,2n -k3,3n -u | \
+              awk -F. '$2 % 2 == 1' | \
+              tail -1)
+            echo "version=${VER}" >> "$GITHUB_OUTPUT"
+            echo "Latest mainline: ${VER}"
+          else
+            echo "version=${{ inputs.nginx_version }}" >> "$GITHUB_OUTPUT"
+            echo "Using: ${{ inputs.nginx_version }}"
+          fi
+
       - name: Set output file name
         id: vars
         run: |
+          NGX_VER="${{ steps.nginx.outputs.version }}"
           OS_LABEL=$(echo "${{ inputs.base_image }}" | tr ':.' '-')
-          FILE="ngx_http_acme_module_nginx-${{ inputs.nginx_version }}_${OS_LABEL}"
+          FILE="ngx_http_acme_module_nginx-${NGX_VER}_${OS_LABEL}"
           echo "name=${FILE}" >> "$GITHUB_OUTPUT"
           echo "file=${FILE}.so" >> "$GITHUB_OUTPUT"
 
@@ -57,8 +77,8 @@ jobs:
           target: output
           outputs: type=local,dest=./output
           build-args: |
-            BASE_IMAGE=${{ inputs.base_image }}
-            NGINX_VERSION=${{ inputs.nginx_version }}
+            RUST_IMAGE=${{ inputs.base_image }}
+            NGINX_VERSION=${{ steps.nginx.outputs.version }}
             ACME_VERSION=${{ steps.acme.outputs.version }}
           no-cache: true
 
