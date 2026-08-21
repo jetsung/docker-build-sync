@@ -62,9 +62,17 @@ RUN echo "Building nginx-acme module..." && \
     make modules && \
     ls -lh objs/ngx_http_acme_module.so
 
+# 检测基础镜像系统标识(系统名称+主次版本号, 如 debian13.5, alpine3.24),
+# 供 workflow 生成 release tag 使用
+RUN . /etc/os-release && \
+    OS_ID="${ID}$(echo "${VERSION_ID}" | cut -d. -f1-2)" && \
+    echo "${OS_ID}" > /tmp/os-id && \
+    echo "OS ID: ${OS_ID}"
+
 # ── 输出阶段 ──────────────────────────────────────────────────
 FROM scratch AS output
 
 ARG NGINX_VERSION
 
 COPY --from=builder "/tmp/nginx-${NGINX_VERSION}/objs/ngx_http_acme_module.so" /
+COPY --from=builder /tmp/os-id /

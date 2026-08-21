@@ -19,6 +19,9 @@ name: Build nginx-acme
         type: string
         default: ''
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -58,15 +61,6 @@ jobs:
             echo "Using: ${{ inputs.nginx_version }}"
           fi
 
-      - name: Set output file name
-        id: vars
-        run: |
-          NGX_VER="${{ steps.nginx.outputs.version }}"
-          OS_LABEL=$(echo "${{ inputs.base_image }}" | tr ':.' '-')
-          FILE="ngx_http_acme_module_nginx-${NGX_VER}_${OS_LABEL}"
-          echo "name=${FILE}" >> "$GITHUB_OUTPUT"
-          echo "file=${FILE}.so" >> "$GITHUB_OUTPUT"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -82,14 +76,49 @@ jobs:
             ACME_VERSION=${{ steps.acme.outputs.version }}
           no-cache: true
 
-      - name: Rename artifact
+      - name: Inspect outputs
         run: |
           ls -lh output/
-          mv output/ngx_http_acme_module.so "${{ steps.vars.outputs.file }}"
+
+      - name: Read OS ID
+        id: osid
+        run: |
+          OS_ID=$(cat output/os-id)
+          echo "os_id=${OS_ID}" >> "$GITHUB_OUTPUT"
+          echo "OS ID: ${OS_ID}"
 
       - name: Upload .so artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.vars.outputs.name }}
-          path: ${{ steps.vars.outputs.file }}
+          name: ngx_http_acme_module.so
+          path: output/ngx_http_acme_module.so
           if-no-files-found: error
+
+      - name: Create release tag
+        id: release
+        run: |
+          TAG="nginx-acme-${{ steps.acme.outputs.version }}-${{ steps.nginx.outputs.version }}-${{ steps.osid.outputs.os_id }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 若远端已存在同名 tag/release, 先清理以支持幂等更新
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists, updating..."
+            gh release delete "${TAG}" --repo "$GITHUB_REPOSITORY" --yes || true
+            git push origin ":refs/tags/${TAG}" || true
+          fi
+          git tag "${TAG}"
+          git push origin "${TAG}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          gh release create "${TAG}" output/ngx_http_acme_module.so \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "${TAG}" \
+            --notes "nginx-acme v${{ steps.acme.outputs.version }} 动态模块 (nginx ${{ steps.nginx.outputs.version }})"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
