@@ -116,9 +116,12 @@ jobs:
       - name: Create GitHub Release
         run: |
           TAG="${{ steps.release.outputs.tag }}"
+          NOTES="- nginx-acme: v${{ steps.acme.outputs.version }}
+          - nginx: ${{ steps.nginx.outputs.version }}
+          - OS: ${{ steps.osid.outputs.os_id }}"
           gh release create "${TAG}" output/ngx_http_acme_module.so \
             --repo "$GITHUB_REPOSITORY" \
             --title "${TAG}" \
-            --notes "nginx-acme v${{ steps.acme.outputs.version }} 动态模块 (nginx ${{ steps.nginx.outputs.version }})"
+            --notes "${NOTES}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
