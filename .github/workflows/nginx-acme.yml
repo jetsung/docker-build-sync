@@ -1,0 +1,127 @@
+name: Build nginx-acme
+
+'on':
+  workflow_dispatch:
+    inputs:
+      nginx_version:
+        description: 'Nginx 版本 (留空自动获取最新主线版, 例如: 1.26.3, 1.27.4)'
+        required: false
+        type: string
+        default: ''
+      base_image:
+        description: 'Rust 基础镜像 tag (例如: 1-bookworm, slim-bookworm, alpine3.21, 1-alpine, bullseye)'
+        required: true
+        type: string
+        default: 'latest'
+      acme_version:
+        description: 'nginx-acme 版本 (留空自动获取最新版)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Get nginx-acme latest version
+        id: acme
+        run: |
+          if [ -z "${{ inputs.acme_version }}" ]; then
+            echo "Fetching latest nginx-acme version..."
+            TAG=$(curl -fsSL https://api.github.com/repos/nginx/nginx-acme/releases/latest | jq -r '.tag_name')
+            VER="${TAG#v}"
+            echo "version=${VER}" >> "$GITHUB_OUTPUT"
+            echo "Latest: v${VER}"
+          else
+            echo "version=${{ inputs.acme_version }}" >> "$GITHUB_OUTPUT"
+            echo "Using: v${{ inputs.acme_version }}"
+          fi
+
+      - name: Resolve nginx version
+        id: nginx
+        run: |
+          if [ -z "${{ inputs.nginx_version }}" ]; then
+            echo "Fetching latest nginx mainline version..."
+            VER=$(curl -fsSL https://nginx.org/en/download.html | \
+              grep -oP 'nginx-\d+\.\d+\.\d+\.tar\.gz' | \
+              sed 's/nginx-//;s/\.tar\.gz//' | \
+              sort -t. -k1,1n -k2,2n -k3,3n -u | \
+              awk -F. '$2 % 2 == 1' | \
+              tail -1)
+            echo "version=${VER}" >> "$GITHUB_OUTPUT"
+            echo "Latest mainline: ${VER}"
+          else
+            echo "version=${{ inputs.nginx_version }}" >> "$GITHUB_OUTPUT"
+            echo "Using: ${{ inputs.nginx_version }}"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build .so module
+        uses: docker/build-push-action@v7
+        with:
+          file: docker/nginx-acme.Dockerfile
+          target: output
+          outputs: type=local,dest=./output
+          build-args: |
+            RUST_IMAGE=${{ inputs.base_image }}
+            NGINX_VERSION=${{ steps.nginx.outputs.version }}
+            ACME_VERSION=${{ steps.acme.outputs.version }}
+          no-cache: true
+
+      - name: Inspect outputs
+        run: |
+          ls -lh output/
+
+      - name: Read OS ID
+        id: osid
+        run: |
+          OS_ID=$(cat output/os-id)
+          echo "os_id=${OS_ID}" >> "$GITHUB_OUTPUT"
+          echo "OS ID: ${OS_ID}"
+
+      - name: Upload .so artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ngx_http_acme_module.so
+          path: output/ngx_http_acme_module.so
+          if-no-files-found: error
+
+      - name: Create release tag
+        id: release
+        run: |
+          TAG="nginx-acme-${{ steps.acme.outputs.version }}-${{ steps.nginx.outputs.version }}-${{ steps.osid.outputs.os_id }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 若远端已存在同名 tag/release, 先清理以支持幂等更新
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists, updating..."
+            gh release delete "${TAG}" --repo "$GITHUB_REPOSITORY" --yes || true
+            git push origin ":refs/tags/${TAG}" || true
+          fi
+          git tag "${TAG}"
+          git push origin "${TAG}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          NOTES="- nginx-acme: v${{ steps.acme.outputs.version }}
+          - nginx: ${{ steps.nginx.outputs.version }}
+          - OS: ${{ steps.osid.outputs.os_id }}"
+          gh release create "${TAG}" output/ngx_http_acme_module.so \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "${TAG}" \
+            --notes "${NOTES}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

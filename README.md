@@ -2,10 +2,11 @@
 
 本项目利用 GitHub Actions 实现 Docker 镜像的构建与跨仓库同步:通过 `docker buildx` 构建多平台镜像并推送至 GHCR,通过 `skopeo` 将镜像快速同步、复制到不同镜像仓库。
 
-包含两个工作流:
+包含三个工作流:
 
 - **Docker Build** ([build-image.yml](.github/workflows/build-image.yml)):根据 Dockerfile 构建多架构镜像并推送至 GHCR。
 - **Sync Images** ([sync-images.yml](.github/workflows/sync-images.yml)):使用 `skopeo copy --all` 将镜像同步到多个目标仓库。
+- **Build nginx-acme** ([nginx-acme.yml](.github/workflows/nginx-acme.yml)):构建 [nginx-acme](https://github.com/nginx/nginx-acme) 动态模块 `ngx_http_acme_module.so` 并发布为 GitHub Release。
 
 ## 配置说明
 
@@ -38,9 +39,9 @@ cat ~/.docker/config.json | python3 -c "import base64,sys; print(base64.b64encod
 
 ![](screenshot/sync-images-2.png)
 
-### 2. GITHUB_TOKEN (Docker Build 工作流)
+### 2. GITHUB_TOKEN (Docker Build / Build nginx-acme 工作流)
 
-Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR，无需额外配置。
+Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR；Build nginx-acme 工作流使用 `GITHUB_TOKEN` 创建 Release 标签与 GitHub Release。二者均无需额外配置。
 
 ## 使用方法
 
@@ -82,6 +83,42 @@ Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR�
 
 ![](screenshot/sync-images.png)
 
+### Build nginx-acme（构建 nginx-acme 动态模块）
+
+> **注意**：该工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 创建 Release 标签与 GitHub Release，无需额外配置 Secrets。若远端已存在同名标签/Release，会自动删除重建，支持幂等更新。
+
+该工作流基于 [nginx/nginx-acme](https://github.com/nginx/nginx-acme) 构建 Nginx 动态模块 `ngx_http_acme_module.so`:在指定的 Rust 基础镜像中编译 Nginx 源码与 nginx-acme 模块，产物同时以 Actions Artifact 和 GitHub Release 附件形式提供。Release 标签格式为 `nginx-acme-<acme版本>-<nginx版本>-<os-id>`(例如 `nginx-acme-0.4.1-1.27.4-debian13.5`)。
+
+1. 进入项目的 **Actions** 选项卡。
+2. 选择左侧的 **Build nginx-acme** 工作流。
+3. 点击 **Run workflow** 下拉按钮。
+4. 填写以下参数：
+
+| 参数名称 | 说明 | 示例 |
+| :--- | :--- | :--- |
+| **nginx_version** | Nginx 版本，留空自动获取最新主线版（可选） | `1.27.4` |
+| **base_image** | Rust 基础镜像 tag（必填） | `1-bookworm`、`slim-bookworm`、`alpine3.21`、`1-alpine` |
+| **acme_version** | nginx-acme 版本，留空自动获取最新版（可选） | `0.4.1` |
+
+5. 点击 **Run workflow** 开始构建。
+
+**安装模块：**
+
+1. 通过以下命令提取 Nginx 的 modules 文件夹路径（即模块安装目录）：
+
+```bash
+nginx -V 2>&1 | grep -oP "modules-path=\K[^ ]*"
+```
+
+2. 将下载的 `ngx_http_acme_module.so` 文件保存到上述命令提取出的 modules 文件夹中。
+3. 在 `nginx.conf` 配置文件的顶层（`events` 块之前）添加加载指令：
+
+```nginx
+load_module modules/ngx_http_acme_module.so;
+```
+
+> **注意**：`load_module` 指令必须在 `events` 块之前指定，且该模块要求 Nginx 已启用 `--with-compat` 与 `--with-http_ssl_module` 编译选项（构建产物已包含），加载后需使用 `nginx -t` 校验配置无误再执行 `nginx -s reload`。
+
 ## 功能特性
 
 - **多架构构建**：使用 `docker buildx` 构建 `linux/amd64`、`linux/arm64` 等多平台镜像并推送至 GHCR。
@@ -89,6 +126,7 @@ Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR�
 - **多目标支持**：一次运行可将镜像推送到多个不同的镜像仓库。
 - **可选构建脚本**：支持下载并执行自定义 bash 构建脚本，灵活扩展构建流程。
 - **自动安装 Skopeo**：流水线会自动从 [jetsung/install-skopeo](https://github.com/jetsung/install-skopeo) 获取并安装最新的 Skopeo。
+- **nginx-acme 动态模块构建**：支持一键构建 `ngx_http_acme_module.so` 动态模块，可指定或自动获取 Nginx 主线版与 nginx-acme 最新版本，产物以 GitHub Release 发布。
 
 ## 许可证
 
