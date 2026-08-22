@@ -2,10 +2,11 @@
 
 本项目利用 GitHub Actions 实现 Docker 镜像的构建与跨仓库同步:通过 `docker buildx` 构建多平台镜像并推送至 GHCR,通过 `skopeo` 将镜像快速同步、复制到不同镜像仓库。
 
-包含三个工作流:
+包含四个工作流:
 
 - **Docker Build** ([build-image.yml](.github/workflows/build-image.yml)):根据 Dockerfile 构建多架构镜像并推送至 GHCR。
 - **Sync Images** ([sync-images.yml](.github/workflows/sync-images.yml)):使用 `skopeo copy --all` 将镜像同步到多个目标仓库。
+- **Docker Cache** ([docker-cache.yml](.github/workflows/docker-cache.yml)):使用 `docker` CLI 将单个镜像复制到目标注册表，目标注册表认证信息通过密钥加密后由工作流解密登录。
 - **Build nginx-acme** ([nginx-acme.yml](.github/workflows/nginx-acme.yml)):构建 [nginx-acme](https://github.com/nginx/nginx-acme) 动态模块 `ngx_http_acme_module.so` 并发布为 GitHub Release。
 
 ## 配置说明
@@ -42,6 +43,29 @@ cat ~/.docker/config.json | python3 -c "import base64,sys; print(base64.b64encod
 ### 2. GITHUB_TOKEN (Docker Build / Build nginx-acme 工作流)
 
 Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR；Build nginx-acme 工作流使用 `GITHUB_TOKEN` 创建 Release 标签与 GitHub Release。二者均无需额外配置。
+
+### 3. TARGET_AUTH_KEY (Docker Cache 工作流必填)
+
+用于解密 `target_auth_secret` 的密钥字符串（即你加密时使用的那一个）。
+
+**如何生成 target_auth_secret：**
+
+1. 先从 Docker 配置文件 `~/.docker/config.json` 中提取目标注册表的 `auth` 值（该值是 Base64 编码的 `用户名:密码`），请将下面的 `ghcr.io` 替换为你的目标注册表域名：
+
+```bash
+AUTH=$(jq -r '.auths["ghcr.io"].auth' ~/.docker/config.json)
+```
+
+2. 使用你设置的密钥字符串对 `auth` 值加密，输出即为 `target_auth_secret`（将 `你的密钥` 替换为实际密钥）：
+
+```bash
+printf '%s' "$AUTH" | openssl enc -aes-256-cbc -pbkdf2 -a -A -pass pass:"你的密钥"
+```
+
+> **注意**：
+> - 加密与解密必须使用同一密钥，且算法固定为 `aes-256-cbc + pbkdf2`。
+> - 运行时在 **Run workflow** 表单中把加密结果填入 `target_auth_secret` 输入框；密钥本身则保存为 GitHub Secret `TARGET_AUTH_KEY`。
+> - `target_image` 中的注册表域名（如 `ghcr.io`）必须与提取 `auth` 值时使用的注册表一致。
 
 ## 使用方法
 
@@ -82,6 +106,23 @@ Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR�
 5. 点击 **Run workflow** 开始同步。
 
 ![](screenshot/sync-images.png)
+
+### Docker Cache（复制镜像）
+
+> **注意**：`target_auth_secret` 是目标注册表 `auth` 值（Base64 编码的 `用户名:密码`）使用密钥加密后的结果，生成方法见上文「TARGET_AUTH_KEY」一节。`target_image` 中的注册表域名必须与加密所用 auth 对应的注册表一致（例如都使用 `ghcr.io`）。
+
+1. 进入项目的 **Actions** 选项卡。
+2. 选择左侧的 **Docker Cache** 工作流。
+3. 点击 **Run workflow** 下拉按钮。
+4. 填写以下参数：
+
+| 参数名称 | 说明 | 示例 |
+| :--- | :--- | :--- |
+| **source_image** | 源镜像地址（包含仓库地址） | `docker.io/library/alpine:latest` |
+| **target_image** | 目标镜像地址，必须包含注册表域名（必填） | `ghcr.io/username/alpine:latest` |
+| **target_auth_secret** | 目标注册表 auth 值经密钥加密后的结果（必填） | `U2FsdGVkX1...` |
+
+5. 点击 **Run workflow** 开始复制。工作流会先用 `TARGET_AUTH_KEY` 解密认证信息并登录目标注册表，再执行 `docker pull` → `docker tag` → `docker push`。
 
 ### Build nginx-acme（构建 nginx-acme 动态模块）
 

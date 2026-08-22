@@ -15,3 +15,7 @@
 event.json
 .secrets
 .arcenv
+
+# Python
+__pycache__/
+*.py[cod]
