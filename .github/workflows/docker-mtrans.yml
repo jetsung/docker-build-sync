@@ -1,4 +1,4 @@
-name: Docker Cache
+name: Mtrans Sync
 
 on:
   workflow_dispatch:
@@ -11,8 +11,8 @@ on:
         description: '目标镜像（必须包含注册表域名，例如 ghcr.io/user/repo:tag）'
         required: true
         type: string
-      target_auth_secret:
-        description: '目标注册表账号密钥（由 config.json 中 auth 值与密钥加密后取得）'
+      target_auth:
+        description: '目标注册表登录凭据（~/.docker/config.json 中 auths 的 auth 值，base64 编码的 用户名:密码）'
         required: true
         type: string
 
@@ -27,33 +27,33 @@ jobs:
       SOURCE_IMAGE: ${{ inputs.source_image }}
       TARGET_IMAGE: ${{ inputs.target_image }}
     steps:
-      - name: 解密认证信息并登录目标注册表
+      - name: 登录目标注册表
         env:
-          TARGET_AUTH_SECRET: ${{ inputs.target_auth_secret }}
-          TARGET_AUTH_KEY: ${{ secrets.TARGET_AUTH_KEY }}
+          TARGET_AUTH: ${{ inputs.target_auth }}
         run: |
           set -euo pipefail
 
-          # 1. 用密钥解密得到 auth（base64 编码的 username:password）
-          AUTH="$(printf '%s' "$TARGET_AUTH_SECRET" | openssl enc -d -aes-256-cbc -pbkdf2 -a -A -pass "pass:$TARGET_AUTH_KEY")"
-
-          # 2. base64 解码得到 username:password
-          CRED="$(printf '%s' "$AUTH" | base64 -d)"
+          # 1. 对凭据打掩码：即使后续步骤意外回显，日志中也显示为 ***
+          #    （auth 为 base64，需对 base64 与其解码后的 用户名:密码 两段都打掩码）
+          echo "::add-mask::${TARGET_AUTH}"
+          CRED="$(printf '%s' "$TARGET_AUTH" | base64 -d)"
           USERNAME="${CRED%%:*}"
           PASSWORD="${CRED#*:}"
           if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
-            echo "::error::解密或解析认证信息失败，请检查 target_auth_secret 与密钥是否一致" >&2
+            echo "::error::凭据解析失败，请确认 target_auth 为 base64 编码的 用户名:密码" >&2
             exit 1
           fi
+          echo "::add-mask::${USERNAME}"
+          echo "::add-mask::${PASSWORD}"
 
-          # 3. 从目标镜像提取注册表地址（第一个斜杠前的部分，如 ghcr.io/user/repo:tag -> ghcr.io）
+          # 2. 从目标镜像提取注册表地址（第一个斜杠前的部分，如 ghcr.io/user/repo:tag -> ghcr.io）
           if [[ "$TARGET_IMAGE" != */* ]]; then
             echo "::error::target_image 必须包含注册表地址，例如 ghcr.io/user/repo:tag" >&2
             exit 1
           fi
           REGISTRY="${TARGET_IMAGE%%/*}"
 
-          # 4. 登录目标注册表（密码通过 stdin 传入，避免出现在进程参数中）
+          # 3. 登录目标注册表（密码通过 stdin 传入，不进入命令行参数与日志）
           printf '%s' "$PASSWORD" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin
 
       - name: 复制镜像
@@ -64,3 +64,4 @@ jobs:
           docker pull "$SOURCE_IMAGE"
           docker tag "$SOURCE_IMAGE" "$TARGET_IMAGE"
           docker push "$TARGET_IMAGE"
+
