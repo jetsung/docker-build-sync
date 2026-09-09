@@ -34,9 +34,7 @@ jobs:
           # 1. 内联读取凭据并立即打掩码：不经 job/step 级 env 声明（env 注入先于掩码，
           #    存在日志回显窗口）；run 脚本内首行 add-mask 后任何回显均显示为 ***
           #    （auth 为 base64，需对 base64 与其解码后的 用户名:密码 两段都打掩码）
-          AUTH="${{ inputs.target_auth }}"
-          echo "::add-mask::${AUTH}"
-          CRED="$(printf '%s' "$AUTH" | base64 -d)"
+          CRED="$(printf '%s' "${{ inputs.target_auth }}" | base64 -d)"
           USERNAME="${CRED%%:*}"
           PASSWORD="${CRED#*:}"
           if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
