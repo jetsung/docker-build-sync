@@ -4,10 +4,22 @@
 
 包含四个工作流:
 
-- **Docker Build** ([build-image.yml](.github/workflows/build-image.yml)):根据 Dockerfile 构建多架构镜像并推送至 GHCR。
-- **Sync Images** ([sync-images.yml](.github/workflows/sync-images.yml)):使用 `skopeo copy --all` 将镜像同步到多个目标仓库。
-- **Mtrans Sync** ([docker-mtrans.yml](.github/workflows/docker-mtrans.yml)):使用 `docker` CLI 将单个镜像复制到目标注册表，目标注册表登录凭据在运行表单中直接填写，无需配置 Secrets。
-- **Build nginx-acme** ([nginx-acme.yml](.github/workflows/nginx-acme.yml)):构建 [nginx-acme](https://github.com/nginx/nginx-acme) 动态模块 `ngx_http_acme_module.so` 并发布为 GitHub Release。
+- **[Docker Build](#docker-build构建并推送镜像)** ([build-image.yml](.github/workflows/build-image.yml)):根据 Dockerfile 构建多架构镜像并推送至 GHCR。
+- **[Sync Images](#sync-images同步镜像)** ([sync-images.yml](.github/workflows/sync-images.yml)):使用 `skopeo copy --all` 将镜像同步到多个目标仓库。
+- **[Mtrans Sync](#mtrans-sync复制镜像)** ([docker-mtrans.yml](.github/workflows/docker-mtrans.yml)):使用 `docker` CLI 将单个镜像复制到目标注册表，登录凭据在本地加密后经运行表单填入，工作流使用 `AUTH_PASSPHRASE` Secret 解密登录，无需在仓库中长期保存明文凭据。
+- **[Build nginx-acme](#build-nginx-acme构建-nginx-acme-动态模块)** ([nginx-acme.yml](.github/workflows/nginx-acme.yml)):构建 [nginx-acme](https://github.com/nginx/nginx-acme) 动态模块 `ngx_http_acme_module.so` 并发布为 GitHub Release。
+
+## 目录
+
+- [配置说明](#配置说明)
+- [使用方法](#使用方法)
+  - [Docker Build（构建并推送镜像）](#docker-build构建并推送镜像)
+  - [Sync Images（同步镜像）](#sync-images同步镜像)
+  - [Mtrans Sync（复制镜像）](#mtrans-sync复制镜像)
+  - [Build nginx-acme（构建 nginx-acme 动态模块）](#build-nginx-acme构建-nginx-acme-动态模块)
+- [功能特性](#功能特性)
+- [许可证](#许可证)
+- [仓库镜像](#仓库镜像)
 
 ## 配置说明
 
@@ -43,6 +55,10 @@ cat ~/.docker/config.json | python3 -c "import base64,sys; print(base64.b64encod
 ### 2. GITHUB_TOKEN (Docker Build / Build nginx-acme 工作流)
 
 Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR；Build nginx-acme 工作流使用 `GITHUB_TOKEN` 创建 Release 标签与 GitHub Release。二者均无需额外配置。
+
+### 3. AUTH_PASSPHRASE (Mtrans Sync 工作流必填)
+
+Mtrans Sync 工作流在运行时使用此 Secret 解密运行表单中填写的 `target_auth_secret` 加密串（AES-256-CBC + PBKDF2 加密），以登录目标注册表。该值即你在本地执行加密命令时使用的加密口令，请妥善保存，且加密口令与加密串必须配对使用。
 
 ## 使用方法
 
@@ -86,14 +102,19 @@ Docker Build 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 登录 GHCR�
 
 ### Mtrans Sync（复制镜像）
 
-> **注意**：`target_auth` 是目标注册表 `auths` 下的 `auth` 值（Base64 编码的 `用户名:密码`），可直接从 Docker 配置文件（如普通用户为 `~/.docker/config.json`、root 用户为 `/root/.docker/config.json`）中提取，无需加密。`target_image` 中的注册表域名必须与 `target_auth` 对应的注册表一致（例如都使用 `ghcr.io`）。
+> **注意**：`target_auth_secret` 是目标注册表登录凭据（`auths` 下的 `auth` 值，即 Base64 编码的 `用户名:密码`，可直接从 Docker 配置文件如普通用户 `~/.docker/config.json`、root 用户 `/root/.docker/config.json` 中提取）经本地加密口令加密后的密文（AES-256-CBC + PBKDF2），请勿在运行表单中填写明文凭据。加密口令须作为 **AUTH_PASSPHRASE** 保存到 GitHub Secrets，且加密口令与加密串必须配对。`target_image` 中的注册表域名必须与凭据对应的注册表一致（例如都使用 `ghcr.io`）。
 
-**提取 target_auth：**
+**生成 target_auth_secret 加密串：**
 
 ```bash
 # 将 ghcr.io 替换为你的目标注册表域名
-jq -r '.auths["ghcr.io"].auth' ~/.docker/config.json
+AUTH="$(jq -r '.auths["ghcr.io"].auth' ~/.docker/config.json)"
+
+# 使用本地加密口令生成密文（AES-256-CBC + PBKDF2，输出为 Base64）
+printf '%s' "$AUTH" | openssl enc -aes-256-cbc -pbkdf2 -a -A -pass "pass:<你的加密口令>"
 ```
+
+将本地加密口令作为 `AUTH_PASSPHRASE` 保存到 GitHub Secrets（参见上文配置说明），生成的密文在运行时作为 `target_auth_secret` 填入表单。
 
 1. 进入项目的 **Actions** 选项卡。
 2. 选择左侧的 **Mtrans Sync** 工作流。
@@ -104,9 +125,9 @@ jq -r '.auths["ghcr.io"].auth' ~/.docker/config.json
 | :--- | :--- | :--- |
 | **source_image** | 源镜像地址（包含仓库地址） | `docker.io/library/alpine:latest` |
 | **target_image** | 目标镜像地址，必须包含注册表域名（必填） | `ghcr.io/username/alpine:latest` |
-| **target_auth** | 目标注册表登录凭据，即 `~/.docker/config.json` 中 `auths` 的 `auth` 值（必填） | `dXNlcjpwYXNzd29yZA==` |
+| **target_auth_secret** | 目标注册表登录凭据的加密串：`auths` 的 `auth` 值（Base64 编码的 `用户名:密码`）经本地加密口令 AES-256-CBC + PBKDF2 加密（必填） | （`openssl enc` 生成的密文） |
 
-5. 点击 **Run workflow** 开始复制。工作流会先用 `target_auth` 登录目标注册表（凭据自动打掩码，不会出现在日志中），再执行 `docker pull` → `docker tag` → `docker push`。
+5. 点击 **Run workflow** 开始复制。工作流会先用 `AUTH_PASSPHRASE` Secret 解密 `target_auth_secret` 并登录目标注册表（加密口令、凭据等敏感信息均自动打掩码，不会出现在日志中），再执行 `docker pull` → `docker tag` → `docker push`。
 
 ### Build nginx-acme（构建 nginx-acme 动态模块）
 
