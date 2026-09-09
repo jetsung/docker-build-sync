@@ -11,8 +11,8 @@ on:
         description: '目标镜像（必须包含注册表域名，例如 ghcr.io/user/repo:tag）'
         required: true
         type: string
-      target_auth:
-        description: '目标注册表登录凭据（~/.docker/config.json 中 auths 的 auth 值，base64 编码的 用户名:密码）'
+      target_auth_secret:
+        description: '目标注册表登录凭据加密串（本地用加密口令 AES-256-CBC+PBKDF2 加密的 auth）'
         required: true
         type: string
 
@@ -27,32 +27,42 @@ jobs:
       SOURCE_IMAGE: ${{ inputs.source_image }}
       TARGET_IMAGE: ${{ inputs.target_image }}
     steps:
-      - name: 登录目标注册表
+      - name: 解密认证信息并登录目标注册表
+        env:
+          # 加密串与加密口令必须经 env 传递：runner 回显 run 脚本时会把 ${{ }} 表达式
+          # 替换为实际值（内联读取会在 add-mask 执行前的脚本回显中泄漏）；env 值不回显，
+          # 脚本回显中只有变量名。绝不得在 run 脚本中内联 ${{ inputs.* }} 或 ${{ secrets.* }}。
+          TARGET_AUTH_SECRET: ${{ inputs.target_auth_secret }}
+          AUTH_PASSPHRASE: ${{ secrets.AUTH_PASSPHRASE }}
         run: |
           set -euo pipefail
-          echo "::add-mask::${{ inputs.target_auth }}"
 
-          # 1. 内联读取凭据并立即打掩码：不经 job/step 级 env 声明（env 注入先于掩码，
-          #    存在日志回显窗口）；run 脚本内首行 add-mask 后任何回显均显示为 ***
-          #    （auth 为 base64，需对 base64 与其解码后的 用户名:密码 两段都打掩码）
-          CRED="$(printf '%s' "${{ inputs.target_auth }}" | base64 -d)"
+          # 1. 首行对加密口令打掩码：后续任何回显均显示为 ***
+          echo "::add-mask::${AUTH_PASSPHRASE}"
+
+          # 2. 用密钥解密得到 auth（base64 编码的 username:password），随即打掩码
+          AUTH="$(printf '%s' "$TARGET_AUTH_SECRET" | openssl enc -d -aes-256-cbc -pbkdf2 -a -A -pass "pass:$AUTH_PASSPHRASE")"
+          echo "::add-mask::${AUTH}"
+
+          # 3. base64 解码得到 username:password，按第一个冒号拆分，各自打掩码
+          CRED="$(printf '%s' "$AUTH" | base64 -d)"
           USERNAME="${CRED%%:*}"
           PASSWORD="${CRED#*:}"
           if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
-            echo "::error::凭据解析失败，请确认 target_auth 为 base64 编码的 用户名:密码" >&2
+            echo "::error::凭据解析失败，请确认 target_auth_secret 加密串与 Secret AUTH_PASSPHRASE 配对" >&2
             exit 1
           fi
           echo "::add-mask::${USERNAME}"
           echo "::add-mask::${PASSWORD}"
 
-          # 2. 从目标镜像提取注册表地址（第一个斜杠前的部分，如 ghcr.io/user/repo:tag -> ghcr.io）
+          # 4. 从目标镜像提取注册表地址（第一个斜杠前的部分，如 ghcr.io/user/repo:tag -> ghcr.io）
           if [[ "$TARGET_IMAGE" != */* ]]; then
             echo "::error::target_image 必须包含注册表地址，例如 ghcr.io/user/repo:tag" >&2
             exit 1
           fi
           REGISTRY="${TARGET_IMAGE%%/*}"
 
-          # 3. 登录目标注册表（密码通过 stdin 传入，不进入命令行参数与日志）
+          # 5. 登录目标注册表（密码通过 stdin 传入，不进入命令行参数与日志）
           printf '%s' "$PASSWORD" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin
 
       - name: 复制镜像
