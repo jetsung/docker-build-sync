@@ -30,6 +30,7 @@ jobs:
       - name: 登录目标注册表
         run: |
           set -euo pipefail
+          echo "::add-mask::${{ inputs.target_auth }}"
 
           # 1. 内联读取凭据并立即打掩码：不经 job/step 级 env 声明（env 注入先于掩码，
           #    存在日志回显窗口）；run 脚本内首行 add-mask 后任何回显均显示为 ***
