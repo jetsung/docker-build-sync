@@ -131,7 +131,7 @@ printf '%s' "$AUTH" | openssl enc -aes-256-cbc -pbkdf2 -a -A -pass "pass:<你的
 
 ### Build nginx-acme（构建 nginx-acme 动态模块）
 
-> **注意**：该工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 创建 Release 标签与 GitHub Release，无需额外配置 Secrets。若远端已存在同名标签/Release，会自动删除重建，支持幂等更新。
+> **注意**：该工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 创建 Release 标签与 GitHub Release，无需额外配置 Secrets。若远端已存在同名标签/Release，会复用标签并覆盖附件与说明（幂等更新），始终只保留一个发布状态的 Release。
 
 该工作流基于 [nginx/nginx-acme](https://github.com/nginx/nginx-acme) 构建 Nginx 动态模块 `ngx_http_acme_module.so`:在指定的 Rust 基础镜像中编译 Nginx 源码与 nginx-acme 模块，产物同时以 Actions Artifact 和 GitHub Release 附件形式提供。Release 标签格式为 `nginx-acme-<acme版本>-<nginx版本>-<os-id>`(例如 `nginx-acme-0.4.1-1.27.4-debian13.5`)。
 

@@ -102,14 +102,13 @@ jobs:
           echo "Release tag: ${TAG}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # 若远端已存在同名 tag/release, 先清理以支持幂等更新
+          # tag 已存在则直接复用, 不删除重建 (删 tag 会把旧 release 降级为 draft, 导致产生重复 release)
           if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
-            echo "Tag ${TAG} already exists, updating..."
-            gh release delete "${TAG}" --repo "$GITHUB_REPOSITORY" --yes || true
-            git push origin ":refs/tags/${TAG}" || true
+            echo "Tag ${TAG} already exists, reusing it."
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
           fi
-          git tag "${TAG}"
-          git push origin "${TAG}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -119,9 +118,18 @@ jobs:
           NOTES="- nginx-acme: v${{ steps.acme.outputs.version }}
           - nginx: ${{ steps.nginx.outputs.version }}
           - OS: ${{ steps.osid.outputs.os_id }}"
-          gh release create "${TAG}" output/ngx_http_acme_module.so \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "${TAG}" \
-            --notes "${NOTES}"
+          # release 已存在则覆盖附件并更新说明, 否则新建, 保证始终只有一个发布状态 release
+          if gh release view "${TAG}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release ${TAG} already exists, updating assets and notes..."
+            gh release upload "${TAG}" output/ngx_http_acme_module.so \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "${TAG}" --repo "$GITHUB_REPOSITORY" \
+              --title "${TAG}" --notes "${NOTES}" --draft=false
+          else
+            gh release create "${TAG}" output/ngx_http_acme_module.so \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "${TAG}" \
+              --notes "${NOTES}"
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
